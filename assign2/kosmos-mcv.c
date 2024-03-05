@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
         } else {
             fprintf(stderr, "SOMETHING HORRIBLY WRONG WITH ATOM GENERATION\n");
             exit(1);
-        } 
+        }
 
 		if (status != 0) {
 			fprintf(stderr, "Error creating atom thread\n");
@@ -173,76 +173,144 @@ int main(int argc, char *argv[])
  * vvvvvvvv
  */
 
+// Variables to be the max number of each atom type in a radical and the total number of atoms in a radical
+#define MAX_OXYGEN 1
+#define MAX_HYDROGEN 3
+#define MAX_CARBON 1
+#define SIZE_OF_RADICAL 5
 
-/* 
- * DECLARE / DEFINE NEEDED VARIABLES IMMEDIATELY BELOW.
- */
-
+// Variables to keep track of number of each atom currently active, and id numbers of atoms
 int radicals;
-int num_free_c;
-int num_free_h;
+int num_carbon;
+int num_hydrogens;
+int num_oxygen;
+int num_total_atoms;
 
-int combining_c1;
-int combining_c2;
-int combining_h;
+int combining_c;
+int combining_o;
+int combining_h[MAX_HYDROGEN] = {0};
+
+// Combiner holds the atom that initiates the creation of a radical
 char combiner[MAX_ATOM_NAME_LEN];
 
-sem_t mutex;
-sem_t wait_c;
-sem_t wait_h;
-sem_t staging_area;
+// Semiphores
+pthread_mutex_t m;
+pthread_cond_t queue;
 
-
-/*
- * FUNCTIONS YOU MAY/MUST MODIFY.
- */
 
 void kosmos_init() {
+    /*
+     Function initiates variable values and semiphores. Returns nothing
+    */
+    radicals = 1;
+    num_oxygen = 0;
+    num_carbon = 0;
+    num_hydrogens = 0;
+    num_total_atoms = 0;
+    
+    combining_c = 0;
+    combining_o = 0;
 
+    pthread_mutex_init(&m, NULL);
+    pthread_cond_init(&queue, NULL);
 }
 
 
-void *h_ready( void *arg )
-{
+void *h_ready( void *arg ){
+    /*
+    Function handles the addition of hydrogen atoms to a radical, all threads that get here after 3 threads have gone through
+    the while loop check must wait until a new radical is ready to be created. Returns NULL once finished.
+    */
 	int id = *((int *)arg);
     char name[MAX_ATOM_NAME_LEN];
 
     sprintf(name, "h%03d", id);
-
-#ifdef VERBOSE
-	printf("%s now exists\n", name);
-#endif
-
+    pthread_mutex_lock(&m);
+    // All hydrogen atoms that arrive after the first three will suspend
+    while(num_hydrogens==MAX_HYDROGEN){
+        pthread_cond_wait(&queue, &m);
+    }
+    num_hydrogens++;
+    combining_h[num_hydrogens-1] = id;
+    num_total_atoms++;
+    // All atoms that aren't the one to create the reaction will suspend until radical is made and broadcasts
+    if(num_total_atoms<SIZE_OF_RADICAL){
+        int current_gen = radicals;
+        while(current_gen==radicals){
+            pthread_cond_wait(&queue, &m);
+        }
+    }else{
+        num_total_atoms=0;
+        make_radical(combining_c, combining_o, combining_h[0], combining_h[1], combining_h[2], name);
+        pthread_cond_broadcast(&queue);
+    }
+    pthread_mutex_unlock(&m);
 	return NULL;
 }
 
 
-void *c_ready( void *arg )
-{
+void *c_ready( void *arg ){
+    /*
+    Function handles the addition of carbon atoms to a radical, all threads that get here after 1 thread have gone through
+    the while loop check must wait until a new radical is ready to be created. Returns NULL once finished.
+    */
 	int id = *((int *)arg);
     char name[MAX_ATOM_NAME_LEN];
 
     sprintf(name, "c%03d", id);
-
-#ifdef VERBOSE
-	printf("%s now exists\n", name);
-#endif
-	
+    pthread_mutex_lock(&m);
+    // All carbon atoms that arrive after the first one
+    while(num_carbon==MAX_CARBON){
+        pthread_cond_wait(&queue, &m);
+    }
+	num_carbon++;
+    combining_c = id;
+    num_total_atoms++;
+    // All atoms that aren't the one to create the reaction will suspend until radical is made and broadcasts
+    if(num_total_atoms<SIZE_OF_RADICAL){
+        int current_gen = radicals;
+        while(current_gen==radicals){
+            pthread_cond_wait(&queue, &m);
+        }
+    }else{
+        num_total_atoms=0;
+        make_radical(combining_c, combining_o, combining_h[0], combining_h[1], combining_h[2], name);
+        pthread_cond_broadcast(&queue);
+    }
+    pthread_mutex_unlock(&m);
 	return NULL;
 }
 
 
-void *o_ready( void *arg )
-{
+void *o_ready( void *arg ){
+    /*
+    Function handles the addition of oxygen atoms to a radical, all threads that get here after 1 thread have gone through
+    the while loop check must wait until a new radical is ready to be created. Returns NULL once finished.
+    */
 	int id = *((int *)arg);
     char name[MAX_ATOM_NAME_LEN];
 
     sprintf(name, "o%03d", id);
-
-#ifdef VERBOSE
-	printf("%s now exists\n", name);
-#endif
-	
+    // All carbon atoms that arrive after the first one
+    pthread_mutex_lock(&m);
+    while(num_oxygen==MAX_OXYGEN){
+        pthread_cond_wait(&queue, &m);
+    }
+    num_oxygen++;
+    combining_o = id;
+    num_total_atoms++;
+    // All atoms that aren't the one to create the reaction will suspend until radical is made and broadcasts
+    if(num_total_atoms<SIZE_OF_RADICAL){
+        int current_gen = radicals;
+        while(current_gen==radicals){
+            pthread_cond_wait(&queue, &m);
+        }
+    }else{
+        num_total_atoms=0;
+        make_radical(combining_c, combining_o, combining_h[0], combining_h[1], combining_h[2], name);
+        pthread_cond_broadcast(&queue);
+    }
+	pthread_mutex_unlock(&m);
 	return NULL;
 }
 
@@ -253,18 +321,25 @@ void *o_ready( void *arg )
  * perfectly possible that you have a solution which depends on such a
  * function having a purpose as intended by the function's name.
  */
-void make_radical(int c, int o, int h1, int h2, int h3, char *maker)
-{
-#ifdef VERBOSE
-	fprintf(stdout, "A methoxy radical was made: c%03d  o%03d  h%03d h%03d h%03d \n",
-		c, o, h1, h2, h3);
-#endif
+void make_radical(int c, int o, int h1, int h2, int h3, char *maker){
+    /*
+    Function handles the addition the creation of a radical. Takes the name of the atom that "makes" the reaction, and takes the id numbers of one carbon, one oxygen, 
+    and three hydrogen atoms. The radical and the atoms in the radical are sent to the log entry function. Function finishes by resetting number counts for each atom type,
+    and increases radical integer.
+    */
     kosmos_log_add_entry(radicals, c, o, h1, h2, h3, maker);
+    num_oxygen=0;
+    num_hydrogens=0;
+    num_carbon=0;
+    radicals++;
 }
 
 
 void wait_to_terminate(int expected_num_radicals) {
-    /* A rather lazy way of doing it, for now. */
+    /*
+    Function handles the termination of the program. 
+    The function sleeps for a given amount of seconds, then terminates the program
+    */
     sleep(MAX_KOSMOS_SECONDS);
     kosmos_log_dump();
     exit(0);
