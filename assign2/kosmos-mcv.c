@@ -198,9 +198,26 @@ pthread_mutex_t m;
 pthread_cond_t queue;
 
 
+void check_reaction(char *name){
+    /*
+    Function takes the name of an atom and checks if the current atom is the 5th atom of the radical.
+    If the atom is not, it will suspend until the next generation of atoms begin. If the atom is the fifth,
+    It will call make_radical, reset num_total_atoms, and broadcast all suspended threads.
+    */
+    if(num_total_atoms<SIZE_OF_RADICAL){
+        int current_gen = radicals;
+        while(current_gen==radicals){
+            pthread_cond_wait(&queue, &m);
+        }
+    }else{
+        num_total_atoms=0;
+        make_radical(combining_c, combining_o, combining_h[0], combining_h[1], combining_h[2], name);
+        pthread_cond_broadcast(&queue);
+    }
+}
 void kosmos_init() {
     /*
-     Function initiates variable values and semiphores. Returns nothing
+     Function initiates variable values and semiphores. Returns nothing.
     */
     radicals = 1;
     num_oxygen = 0;
@@ -234,16 +251,7 @@ void *h_ready( void *arg ){
     combining_h[num_hydrogens-1] = id;
     num_total_atoms++;
     // All atoms that aren't the one to create the reaction will suspend until radical is made and broadcasts
-    if(num_total_atoms<SIZE_OF_RADICAL){
-        int current_gen = radicals;
-        while(current_gen==radicals){
-            pthread_cond_wait(&queue, &m);
-        }
-    }else{
-        num_total_atoms=0;
-        make_radical(combining_c, combining_o, combining_h[0], combining_h[1], combining_h[2], name);
-        pthread_cond_broadcast(&queue);
-    }
+    check_reaction(name);
     pthread_mutex_unlock(&m);
 	return NULL;
 }
@@ -267,16 +275,7 @@ void *c_ready( void *arg ){
     combining_c = id;
     num_total_atoms++;
     // All atoms that aren't the one to create the reaction will suspend until radical is made and broadcasts
-    if(num_total_atoms<SIZE_OF_RADICAL){
-        int current_gen = radicals;
-        while(current_gen==radicals){
-            pthread_cond_wait(&queue, &m);
-        }
-    }else{
-        num_total_atoms=0;
-        make_radical(combining_c, combining_o, combining_h[0], combining_h[1], combining_h[2], name);
-        pthread_cond_broadcast(&queue);
-    }
+    check_reaction(name);
     pthread_mutex_unlock(&m);
 	return NULL;
 }
@@ -300,16 +299,7 @@ void *o_ready( void *arg ){
     combining_o = id;
     num_total_atoms++;
     // All atoms that aren't the one to create the reaction will suspend until radical is made and broadcasts
-    if(num_total_atoms<SIZE_OF_RADICAL){
-        int current_gen = radicals;
-        while(current_gen==radicals){
-            pthread_cond_wait(&queue, &m);
-        }
-    }else{
-        num_total_atoms=0;
-        make_radical(combining_c, combining_o, combining_h[0], combining_h[1], combining_h[2], name);
-        pthread_cond_broadcast(&queue);
-    }
+    check_reaction(name);
 	pthread_mutex_unlock(&m);
 	return NULL;
 }
