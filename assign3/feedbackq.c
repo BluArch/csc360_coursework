@@ -215,7 +215,7 @@ void handle_instruction(Instruction_t *instruction, int tick) {
         temp->id = instruction->task_id;
         temp->burst_time = instruction->burst_time;
         temp->remaining_burst_time = instruction->burst_time;
-        temp->current_queue = 0;
+        temp->current_queue = 1;
         temp->total_wait_time = 0;
         temp->total_execution_time = 0;
         temp->next = NULL;
@@ -241,16 +241,17 @@ void handle_instruction(Instruction_t *instruction, int tick) {
         
     // Initiates the action of a task
 	} else {
+        Queue_t *queue;
         // Get task from the task table
         table_reference = &task_table[task_id-1];
 
         // Update the task's burst time values
-        table_reference->current_queue = 1;
+        queue = get_queue_by_id(table_reference->current_queue);
         table_reference->remaining_burst_time = instruction->burst_time;
         table_reference->burst_time = instruction->burst_time;
         
         // Enqueue it to queue_1
-        enqueue(queue_1, &task_table[task_id - 1]);
+        enqueue(queue, &task_table[task_id - 1]);
 	}
 }
 
