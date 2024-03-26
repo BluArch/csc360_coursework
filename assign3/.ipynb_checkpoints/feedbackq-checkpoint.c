@@ -207,9 +207,9 @@ void handle_instruction(Instruction_t *instruction, int tick) {
     // Temporary Task struct to reference task_table tasks
     Task_t *table_reference;
 
-    // New task is being initialized
+    // Create a task struct for a new task
 	if(instruction->burst_time == 0) { 
-        // Create a task struct for current instruction
+        // Get task at memory location
         Task_t *temp = &task_table[task_id - 1];
         
         temp->id = instruction->task_id;
@@ -223,28 +223,32 @@ void handle_instruction(Instruction_t *instruction, int tick) {
 		// New Task Arrival, add to task table
 		printf("[%05d] id=%04d NEW\n", tick, task_id);
 
-    // Task wants to end it all
+    // Task is ready to terminate
 	} else if(instruction->burst_time == -1) { 
-		// waiting_time and turn_around_time variables
+		
 		int waiting_time;
 		int turn_around_time;
-        // Grab the task we want from the table
+        
+        // Get task from the task table
 		table_reference = &task_table[task_id-1];
+        
         // Calculate WT and TAT
         waiting_time = table_reference->total_wait_time;
         turn_around_time = table_reference->total_execution_time + waiting_time;
 
 		printf("[%05d] id=%04d EXIT wt=%d tat=%d\n", tick, task_id, 
 			waiting_time, turn_around_time);
-
+        
+    // Initiates the action of a task
 	} else {
-        // A task is now ready for scheduling, update values
+        // Get task from the task table
         table_reference = &task_table[task_id-1];
 
-        // Put task in queue_1
+        // Update the task's burst time values
         table_reference->current_queue = 1;
         table_reference->remaining_burst_time = instruction->burst_time;
         table_reference->burst_time = instruction->burst_time;
+        
         // Enqueue it to queue_1
         enqueue(queue_1, &task_table[task_id - 1]);
 	}
@@ -259,6 +263,7 @@ void handle_instruction(Instruction_t *instruction, int tick) {
  *  Does NOT dequeue the task.
  */
 Task_t *peek_priority_task() {
+    // Return the start task of the highest priority queue that isn't empty
 	if (is_empty(queue_1)!=1){
         return queue_1->start;
     } else if (is_empty(queue_2)!=1){
@@ -291,33 +296,32 @@ void decrease_task_level(Task_t *task) {
  *  set to a maximum of 2 (or left unchanged if it's less than two). 
  *  Boosts do not take CPU time.
  */
-
 void boost(int tick) {
 
 	if (tick % BOOST_INTERVAL != 0) return;
     
     Task_t *temp;
-
+    // Update current_tasks' values for boost if in queue_3
     if(current_task!=NULL){
          if (current_task->current_queue==3){
             current_task->current_queue = 1;
             remaining_quantum = QUEUE_TIME_QUANTUMS[0];
         }
     }
-    
+    // Boost all tasks in queue_3
 	while(is_empty(queue_3)!=1){
         temp = dequeue(queue_3);
         temp->current_queue = 1;
         enqueue(queue_1, temp);
     }
-    
+    // Update current_tasks' values for boost if in queue_2
     if(current_task!=NULL){
         if (current_task->current_queue==2){
             current_task->current_queue = 1;
             remaining_quantum = QUEUE_TIME_QUANTUMS[0];
         }
     }
-    
+    // Boost all tasks in queue_2
     while(is_empty(queue_2)!=1){
         temp = dequeue(queue_2);
         temp->current_queue = 1;
@@ -344,7 +348,7 @@ void scheduler() {
     // Temp value for storing queue values
     Queue_t *queue;
 
-    // current_task has run it's course in this quantum, we decrease it's level
+    // Current task has used it's quantums for this queue, we move it down and reset current_task
     if(current_task!=NULL && remaining_quantum==0){
         decrease_task_level(current_task);
         queue = get_queue_by_id(current_task->current_queue);
@@ -358,17 +362,17 @@ void scheduler() {
     
     // Check that there is a priority_task in queue
     if(priority_task != NULL){
-        // Check that there is a current_task active, if yes then we check
+        // Check that there is a current_task active, if yes we compare to priority_task
         if(current_task != NULL){
             if(priority_task->current_queue < current_task->current_queue){
-                // current_task was finished anyways, we decrease the queue we're going to enqueue it into
+                // Current task was finished anyways, we decrease the queue we're going to enqueue it into
                 if(remaining_quantum == 0){
                     decrease_task_level(current_task);
                 }
-                // current_task is put back into it's appropriate queue
+                // Current task is put back into it's appropriate queue
                 queue = get_queue_by_id(current_task->current_queue);
                 enqueue(queue, current_task);
-                // priority_task is dequeued, set as the current_task, and remaining_quantum is reset
+                // Priority task is dequeued, set as the current_task, and remaining_quantum is reset
                 queue = get_queue_by_id(priority_task->current_queue);
                 current_task = dequeue(queue);
                 remaining_quantum = QUEUE_TIME_QUANTUMS[current_task->current_queue - 1];
@@ -395,6 +399,7 @@ void scheduler() {
  */
 void execute_task(int tick) {
 	if(current_task != NULL) {
+        // Decrease current_tasks' burst time, and remaining quantum
 		current_task->remaining_burst_time--;
         remaining_quantum--;
     
@@ -423,11 +428,14 @@ void execute_task(int tick) {
  *	turnaround time.
  */
 void update_task_metrics() {
+    // Increase total execution time is there is a current_task running
 	if (current_task!=NULL){
         current_task->total_execution_time++;
     }
+    
     Task_t *temp_task;
     int num_tasks_in_queue;
+    
     // Increase wait times for queue_1 tasks
     if(is_empty(queue_1)!=1){
         num_tasks_in_queue = queue_size(queue_1);
