@@ -93,7 +93,7 @@ into the program, and that the simulator loop should terminate.
 Your implementation of `assign3/feedbackq.c` will accept a single argument
 consisting of a text file with lines, the lines together containing
 information about tasks for a particular simulation case. For example,
-to run the first test case theç following would be entered at the
+to run the first test case the following would be entered at the
 command line:
 
 `./feedbackq cases/test1.txt`
