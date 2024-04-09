@@ -50,7 +50,7 @@ int swap_outs   = 0;
 int swap_ins    = 0;
 
 /*
- * Variables used to keep track of the indexing for FIFO and Clock
+ * Variables used to keep track of Clock hand and FIFO indexing
  */
 int fifo_index = 0;
 int clock_hand = 0;
@@ -66,14 +66,14 @@ struct page_table_entry {
     int use;
     int dirty;
     int free;
-
-    // Keep track of the frame
     long frame;
+
     // For linked list
     struct page_table_entry *next;
     struct page_table_entry *prev;
 };
 
+// Variables to keep track of both ends of the linked list of page table entries
 struct page_table_entry *start_of_queue = NULL;
 struct page_table_entry *end_of_queue = NULL;
 
@@ -90,14 +90,18 @@ int size_of_memory = 0; /* number of frames */
 int page_replacement_scheme = REPLACE_NONE;
 
 /*
-TODO: FUNCTION DESCRIPTION
-*/
+ * Function that takes a page_table_entry as input and places it in the
+ * back of the linked list, end_of_queue and start_of_queue are updated
+ * as needed.
+ */
 void add_to_back(struct page_table_entry *page)
 {
+    // If the list is currently empty
     if(start_of_queue == NULL && end_of_queue == NULL){
         end_of_queue = page;
         start_of_queue = page;
         return;
+    // Add to end of list
     }else{
         end_of_queue->prev = page;
         page->next = end_of_queue;
@@ -106,10 +110,13 @@ void add_to_back(struct page_table_entry *page)
 }
 
 /*
-TODO: FUNCTION DESCRIPTION
-*/
+ * Function that takes a page_table_entry as input and removes it from it's
+ * current position in the linked list and places it at the end of the linked
+ * list, end_of_queue and start_of_queue are updated as needed.
+ */
 void swap_to_back(struct page_table_entry *page)
 {
+    // If the list only has "page" in it
     if(start_of_queue != page && end_of_queue != page){
         page->prev->next = page->next;
         page->next->prev = page->prev;
@@ -118,6 +125,7 @@ void swap_to_back(struct page_table_entry *page)
         page->next = end_of_queue;
         page->prev = NULL;
         end_of_queue = page;
+    // If page is at the start of the lsit
     } else if(start_of_queue == page){
         start_of_queue = page->prev;
         page->prev->next = NULL;
@@ -163,16 +171,18 @@ long resolve_address(long logical, int memwrite)
      * address and return the result. */
     if (frame != -1) {
         effective = (frame << size_of_frame) | offset;
-        
+
+        // If we are perforing a memwrite update dirty bit
         if(memwrite == TRUE){
             page_table[i].dirty = TRUE;
         }
-
+        // Update use bit
         page_table[i].use = TRUE;
         
         // Store current frame value into page_table_entry
         page_table[i].frame = i;
-        
+
+        // Frame is most recently used, move to back of queue
         swap_to_back(&page_table[i]);
         return effective;
     }
@@ -199,10 +209,12 @@ long resolve_address(long logical, int memwrite)
         swap_ins++;
         effective = (frame << size_of_frame) | offset;
 
+        // If we are performing a memwrite, update dirty
         if(memwrite == TRUE){
             page_table[frame].dirty = TRUE;
         }
-        
+
+        // Frame is most recently used, move to back of queue
         add_to_back(&page_table[i]);
         return effective;
     } else {
@@ -216,68 +228,95 @@ long resolve_address(long logical, int memwrite)
     }
 }
 
+/*
+ * Function performs page replacement based on fifo algorithm.
+ * Swap is performed and fifo index is updated. Dirty and use
+ * bits are updated as needed. Swap-ins and swap-outs updated as 
+ * needed. Returns effective.
+ */
 long handle_fifo(long new_page, long offset, int memwrite)
 {
+    // Handle fifo_index so it doesn't go out of bounds
     fifo_index = fifo_index % size_of_memory;
     
     long frame = page_table[fifo_index].frame;
     page_table[fifo_index].page_num = new_page;
-    
+
+    // Check if bit was dirty
     if(page_table[fifo_index].dirty == TRUE){
         swap_outs++;
         page_table[fifo_index].dirty = FALSE;
     }
-    
     swap_ins++;
-
+    
+    // Check if we are performing a memwrite
     if(memwrite == TRUE){
         page_table[fifo_index].dirty = TRUE;
     }
-    
+    // Update fifo_index
     fifo_index = (fifo_index+1) % size_of_memory;
     return (frame << size_of_frame) | offset;
 }
 
+/*
+ * Function performs page replacement based on lru algorithm.
+ * Frame is moved to the back of queue and it's page number
+ * is updated. Dirty and use bits are updated as needed. Returns
+ * effective.
+ */
 long handle_lru(long new_page, long offset, int memwrite)
 {
+    // Move start frame to back of queue and update it's page number
     swap_to_back(start_of_queue);
     end_of_queue->page_num = new_page;
-    
-    swap_ins++;
+
+    // Check if bit was dirty
     if(end_of_queue->dirty == TRUE){
         swap_outs++;
         end_of_queue->dirty = FALSE;
     }
-    
+    swap_ins++;
+
+    // Check if we are performing a memwrite
     if(memwrite == TRUE){
         end_of_queue->dirty = TRUE;
     }
-    
     long frame = end_of_queue->frame;
     return (frame << size_of_frame) | offset;
 }
 
+/*
+ * Function performs page replacement based on clock algorithm.
+ * Clock hand will move around page_table until finding a use
+ * bit set to FALSE, setting use bits to FALSE along the way. 
+ * Clock hand starts at index zero .Dirty and use bits are updated 
+ * as needed. Returns effective
+ */
 long handle_clock(long new_page, long offset, int memwrite){
-    
+
+    // Loop until we find a FALSE use bit
     while(page_table[clock_hand].use==TRUE){
         page_table[clock_hand].use = FALSE;
         clock_hand = (clock_hand+1) % size_of_memory;
     }
-    
+
+    // Update page number
     page_table[clock_hand].page_num = new_page;
 
+    // Check if bit was dirty
     if(page_table[clock_hand].dirty == TRUE){
         swap_outs++;
         page_table[clock_hand].dirty = FALSE;
     }
-
-    
     swap_ins++;
+    
+    // Check if we are performing a memwrite
     if(memwrite == TRUE){
         page_table[clock_hand].dirty = TRUE;
     }
-    
+
     long frame = clock_hand;
+    // Update clock hand
     clock_hand = (clock_hand+1) % size_of_memory;
     return (frame << size_of_frame) | offset;
 }
@@ -324,15 +363,13 @@ int setup()
     }
 
     for (i=0; i<size_of_memory; i++) {
-        // Set dirty bit for every struct to false
+        // Initialize values
         page_table[i].page_num = 0;
         page_table[i].use = FALSE;
         page_table[i].dirty = FALSE;
-        
         page_table[i].free = TRUE;
         page_table[i].frame = 0;
 
-        // Initialize prev and next;
         page_table[i].next = NULL;
         page_table[i].prev = NULL;
     }
