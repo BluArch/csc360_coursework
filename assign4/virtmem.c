@@ -36,7 +36,9 @@ int teardown(void);
 int output_report(void);
 long resolve_address(long, int);
 void error_resolve_address(long, int);
-
+long handle_fifo(long, long, int);
+long handle_lru(long, long, int);
+long handle_clock(long, long, int);
 
 /*
  * Variables used to keep track of the number of memory-system events
@@ -47,6 +49,11 @@ int mem_refs    = 0;
 int swap_outs   = 0;
 int swap_ins    = 0;
 
+/*
+ * Variables used to keep track of the indexing for FIFO and Clock
+ */
+int fifo_index = 0;
+int clock_hand = 0;
 
 /*
  * Page-table information. You are permitted to modify this in order to
@@ -56,10 +63,19 @@ int swap_ins    = 0;
 struct page_table_entry *page_table = NULL;
 struct page_table_entry {
     long page_num;
+    int use;
     int dirty;
     int free;
+
+    // Keep track of the frame
+    long frame;
+    // For linked list
+    struct page_table_entry *next;
+    struct page_table_entry *prev;
 };
 
+struct page_table_entry *start_of_queue = NULL;
+struct page_table_entry *end_of_queue = NULL;
 
 /*
  * These global variables will be set in the main() function. The default
@@ -73,6 +89,42 @@ int size_of_frame = 0;  /* power of 2 */
 int size_of_memory = 0; /* number of frames */
 int page_replacement_scheme = REPLACE_NONE;
 
+/*
+TODO: FUNCTION DESCRIPTION
+*/
+void add_to_back(struct page_table_entry *page)
+{
+    if(start_of_queue == NULL && end_of_queue == NULL){
+        end_of_queue = page;
+        start_of_queue = page;
+        return;
+    }else{
+        end_of_queue->prev = page;
+        page->next = end_of_queue;
+        end_of_queue = page;
+    }
+}
+
+/*
+TODO: FUNCTION DESCRIPTION
+*/
+void swap_to_back(struct page_table_entry *page)
+{
+    if(start_of_queue != page && end_of_queue != page){
+        page->prev->next = page->next;
+        page->next->prev = page->prev;
+
+        end_of_queue->prev = page;
+        page->next = end_of_queue;
+        page->prev = NULL;
+        end_of_queue = page;
+    } else if(start_of_queue == page){
+        start_of_queue = page->prev;
+        page->prev->next = NULL;
+
+        add_to_back(page);
+    }
+}
 
 /*
  * Function to convert a logical address into its corresponding 
@@ -111,6 +163,17 @@ long resolve_address(long logical, int memwrite)
      * address and return the result. */
     if (frame != -1) {
         effective = (frame << size_of_frame) | offset;
+        
+        if(memwrite == TRUE){
+            page_table[i].dirty = TRUE;
+        }
+
+        page_table[i].use = TRUE;
+        
+        // Store current frame value into page_table_entry
+        page_table[i].frame = i;
+        
+        swap_to_back(&page_table[i]);
         return effective;
     }
 
@@ -135,14 +198,89 @@ long resolve_address(long logical, int memwrite)
         page_table[i].free = FALSE;
         swap_ins++;
         effective = (frame << size_of_frame) | offset;
+
+        if(memwrite == TRUE){
+            page_table[frame].dirty = TRUE;
+        }
+        
+        add_to_back(&page_table[i]);
         return effective;
     } else {
-        return -1;
+        if(page_replacement_scheme == REPLACE_FIFO){
+            return handle_fifo(page, offset, memwrite);
+        }else if(page_replacement_scheme == REPLACE_LRU){
+            return handle_lru(page, offset, memwrite);
+        }else{
+            return handle_clock(page, offset, memwrite);
+        }
     }
 }
 
+long handle_fifo(long new_page, long offset, int memwrite)
+{
+    fifo_index = fifo_index % size_of_memory;
+    
+    long frame = page_table[fifo_index].frame;
+    page_table[fifo_index].page_num = new_page;
+    
+    if(page_table[fifo_index].dirty == TRUE){
+        swap_outs++;
+        page_table[fifo_index].dirty = FALSE;
+    }
+    
+    swap_ins++;
 
+    if(memwrite == TRUE){
+        page_table[fifo_index].dirty = TRUE;
+    }
+    
+    fifo_index = (fifo_index+1) % size_of_memory;
+    return (frame << size_of_frame) | offset;
+}
 
+long handle_lru(long new_page, long offset, int memwrite)
+{
+    swap_to_back(start_of_queue);
+    end_of_queue->page_num = new_page;
+    
+    swap_ins++;
+    if(end_of_queue->dirty == TRUE){
+        swap_outs++;
+        end_of_queue->dirty = FALSE;
+    }
+    
+    if(memwrite == TRUE){
+        end_of_queue->dirty = TRUE;
+    }
+    
+    long frame = end_of_queue->frame;
+    return (frame << size_of_frame) | offset;
+}
+
+long handle_clock(long new_page, long offset, int memwrite){
+    
+    while(page_table[clock_hand].use==TRUE){
+        page_table[clock_hand].use = FALSE;
+        clock_hand = (clock_hand+1) % size_of_memory;
+    }
+    
+    page_table[clock_hand].page_num = new_page;
+
+    if(page_table[clock_hand].dirty == TRUE){
+        swap_outs++;
+        page_table[clock_hand].dirty = FALSE;
+    }
+
+    
+    swap_ins++;
+    if(memwrite == TRUE){
+        page_table[clock_hand].dirty = TRUE;
+    }
+    
+    long frame = clock_hand;
+    clock_hand = (clock_hand+1) % size_of_memory;
+    return (frame << size_of_frame) | offset;
+}
 /*
  * Super-simple progress bar.
  */
@@ -186,9 +324,18 @@ int setup()
     }
 
     for (i=0; i<size_of_memory; i++) {
+        // Set dirty bit for every struct to false
+        page_table[i].page_num = 0;
+        page_table[i].use = FALSE;
+        page_table[i].dirty = FALSE;
+        
         page_table[i].free = TRUE;
-    }
+        page_table[i].frame = 0;
 
+        // Initialize prev and next;
+        page_table[i].next = NULL;
+        page_table[i].prev = NULL;
+    }
     return -1;
 }
 
@@ -255,7 +402,7 @@ int main(int argc, char **argv)
                 page_replacement_scheme = REPLACE_FIFO;
             } else if (strcmp(s, "lru") == 0) {
                 page_replacement_scheme = REPLACE_LRU;
-            } else if (strcmp(s, "lru") == 0) {
+            } else if (strcmp(s, "clock") == 0) {
                 page_replacement_scheme = REPLACE_CLOCK;
             } else if (strcmp(s, "optimal") == 0) {
                 page_replacement_scheme = REPLACE_OPTIMAL;
