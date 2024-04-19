@@ -115,4 +115,4 @@ jovyan@jupyter-haohushen:~/csc360-eval/jcruikshanks/assign4$ ./full-compare.sh 9
 
 ---
 
-### Assignment grade: 40404040
+### Assignment grade: 40
